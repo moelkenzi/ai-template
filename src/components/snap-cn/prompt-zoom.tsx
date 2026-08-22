@@ -4,7 +4,9 @@ import { loadFont as loadSans } from "@remotion/google-fonts/Inter";
 import { loadFont as loadSerif } from "@remotion/google-fonts/SourceSerif4";
 import {
   AbsoluteFill,
+  Easing,
   getRemotionEnvironment,
+  interpolate,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -38,9 +40,12 @@ export interface PromptZoomProps {
   effort?: string;
   /** Seconds at which typing begins. */
   typeStart?: number;
-  /** Seconds at which the view cuts. Not a transition — one frame. It lands
-   *  *while the prompt is still being typed*, which is the whole gag. */
+  /** Seconds at which the view cuts/zooms. */
   cutAt?: number;
+  /** Duration of the zoom transition in seconds (e.g. 0.4s). Set to 0 for a hard snap. */
+  zoomDuration?: number;
+  /** Whether the camera smoothly tracks/follows the caret as text grows. Defaults to true. */
+  followCaret?: boolean;
   /** Typing speed. 18 is what the reference measures. */
   charsPerSecond?: number;
   /** How far the cut pushes in. 2.547 is what the reference measures. */
@@ -217,6 +222,8 @@ export function PromptZoom({
   effort = "Medium",
   typeStart = 0.35,
   cutAt = 1.0,
+  zoomDuration = 0.4,
+  followCaret = true,
   charsPerSecond = 18,
   zoom = 2.547,
   focusX = 0.27,
@@ -258,6 +265,22 @@ export function PromptZoom({
   // --- timeline ---
   const cutF = cutAt * fps;
   const zoomed = isZoomed(fc, cutF);
+  
+  // Smooth zoom transition calculation
+  const zoomDurationF = Math.max(0, zoomDuration * fps);
+  const currentZoom = zoomDurationF > 0
+    ? interpolate(
+        fc,
+        [cutF, cutF + zoomDurationF],
+        [1, zoom],
+        {
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        }
+      )
+    : (zoomed ? zoom : 1);
+
   const typedN = typedCount(
     fc,
     typeStart * fps,
@@ -267,6 +290,24 @@ export function PromptZoom({
   const typing = typedN > 0 && typedN < text.length;
   const typed = text.slice(0, typedN);
   const caret = caretOn(fc, fps, typing);
+
+  // Camera focus tracking calculation as text is typed
+  const charFraction = text.length > 0 ? typedN / text.length : 0;
+  const estimatedPx = Math.min(BOX.w - PAD * 2, text.length * 6.8);
+  const targetCaretX = (BOX.x + PAD + charFraction * estimatedPx) / REF_W;
+
+  const currentFocusX = followCaret
+    ? interpolate(
+        fc,
+        [typeStart * fps, (typeStart + text.length / charsPerSecond) * fps],
+        [focusX, Math.min(0.72, Math.max(focusX, targetCaretX))],
+        {
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        }
+      )
+    : focusX;
 
   const isRendering = getRemotionEnvironment().isRendering;
   const willChange = isRendering ? undefined : ("transform" as const);
@@ -330,15 +371,13 @@ export function PromptZoom({
           transform: `translate(-50%, -50%) scale(${stageScale})`,
         }}
       >
-        {/* The cut. A plain static scale about the caret — no interpolation, so
-            there is never a frame of it "zooming". `transformOrigin` is the
-            measured focal point, in the same units as everything else. */}
+        {/* Smooth zoom transition scale about the tracking caret */}
         <div
           style={{
             position: "absolute",
             inset: 0,
-            transform: `scale(${zoomed ? zoom : 1})`,
-            transformOrigin: `${focusX * REF_W}px ${focusY * REF_H}px`,
+            transform: `scale(${currentZoom})`,
+            transformOrigin: `${currentFocusX * REF_W}px ${focusY * REF_H}px`,
             willChange,
           }}
         >

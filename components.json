@@ -23,6 +23,7 @@
   "menuAccent": "subtle",
   "registries": {
     "@smoothui": "https://smoothui.dev/r/{name}.json",
-    "@snapcn": "https://snapcn.dev/r/{name}.json"
+    "@snapcn": "https://snapcn.dev/r/{name}.json",
+    "@remocn": "https://www.remocn.dev/r/{name}.json"
   }
 }
